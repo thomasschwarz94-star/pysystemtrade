@@ -1,37 +1,43 @@
-from sysdata.config.production_config import get_production_config
-from syscore.constants import arg_not_supplied
+import os
+import yaml
 
-LIST_OF_IB_PARAMS = ["ib_ipaddress", "ib_port", "ib_idoffset"]
-
-
-def ib_defaults(**kwargs):
+def ib_defaults():
     """
-    Returns ib configuration with following precedence
-    1- if passed in arguments: ipaddress, port, idoffset - use that
-    2- if defined in private_config file, use that. ib_ipaddress, ib_port, ib_idoffset
-    3 - if defined in system defaults file, use that
-
-    :return: mongo db, hostname, port
+    Robust IB connection defaults loader.
+    Lädt Werte aus private/private_config.yaml,
+    oder nutzt sinnvolle Defaults für Paper Trading.
     """
 
-    # this will include defaults.yaml if not defined in private
-    passed_param_names = list(kwargs.keys())
-    output_dict = {}
-    config = get_production_config()
-    for param_name in LIST_OF_IB_PARAMS:
-        if param_name in passed_param_names:
-            param_value = kwargs[param_name]
-        else:
-            param_value = arg_not_supplied
+    base_path = os.path.expanduser("~/systemtrade/pysystemtrade/private")
+    yaml_file = os.path.join(base_path, "private_config.yaml")
 
-        if param_value is arg_not_supplied:
-            param_value = getattr(config, param_name)
+    defaults = {
+        "ib_ipaddress": "127.0.0.1",
+        "ib_port": 7497,
+        "ib_account": "DU1234567",
+        "ib_client_id": 101,
+    }
 
-        output_dict[param_name] = param_value
+    # YAML-Datei prüfen
+    if not os.path.exists(yaml_file):
+        print(f"⚠️  Keine private_config.yaml gefunden unter {yaml_file}. Verwende Defaults.")
+        return defaults
 
-    # Get from dictionary
-    ipaddress = output_dict["ib_ipaddress"]
-    port = output_dict["ib_port"]
-    idoffset = output_dict["ib_idoffset"]
+    try:
+        with open(yaml_file, "r") as f:
+            config_data = yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"❌ Fehler beim Laden von {yaml_file}: {e}")
+        return defaults
 
-    return ipaddress, port, idoffset
+    broker_config = config_data.get("broker", {})
+
+    final_config = {
+        "ib_ipaddress": broker_config.get("host", defaults["ib_ipaddress"]),
+        "ib_port": broker_config.get("port", defaults["ib_port"]),
+        "ib_account": broker_config.get("account", defaults["ib_account"]),
+        "ib_client_id": broker_config.get("client_id", defaults["ib_client_id"]),
+    }
+
+    print("✅ IB Defaults erfolgreich geladen:", final_config)
+    return final_config

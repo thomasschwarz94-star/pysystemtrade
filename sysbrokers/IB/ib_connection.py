@@ -1,133 +1,119 @@
-"""
-IB connection using ib-insync https://ib-insync.readthedocs.io/api.html
-
-"""
-
 import time
-
 from ib_insync import IB
-
 from sysbrokers.IB.ib_connection_defaults import ib_defaults
 from syscore.exceptions import missingData
 from syscore.constants import arg_not_supplied
-
 from syslogging.logger import *
-
 from sysdata.config.production_config import get_production_config
 
 
-class connectionIB(object):
+class connectionIB:
     """
-    Connection object for connecting IB
-    (A database plug in will need to be added for streaming prices)
+    Handles Interactive Brokers (IB) connection using ib_insync.
     """
 
-    def __init__(
-        self,
-        client_id: int,
-        ib_ipaddress: str = arg_not_supplied,
-        ib_port: int = arg_not_supplied,
-        account: str = arg_not_supplied,
-        log_name: str = "connectionIB",
-    ):
+    def __init__(self, client_id: int, ib_ipaddress=None, ib_port=None, account=arg_not_supplied, log=None):
         """
-        :param client_id: client id
-        :param ipaddress: IP address of machine running IB Gateway or TWS. If not passed then will get from private config file, or defaults
-        :param port: Port listened to by IB Gateway or TWS
-        :param log_name: calling log name
-        :param mongo_db: mongoDB connection
+        Initialize the IB connection safely, using defaults if not provided.
         """
+        self.client_id = client_id
+        self.log = log or get_logger("connectionIB")
 
-        # resolve defaults
-        ipaddress, port, __ = ib_defaults(ib_ipaddress=ib_ipaddress, ib_port=ib_port)
-        self._ib_connection_config = dict(
-            ipaddress=ipaddress, port=port, client=client_id
-        )
+        defaults = ib_defaults()
+        ipaddress = ib_ipaddress or defaults.get("ib_ipaddress", "127.0.0.1")
+        port = ib_port or defaults.get("ib_port", 7497)
 
-        # The client id is pulled from a mongo database
-        # If for example you want to use a different database you could do something like:
-        # connectionIB(mongo_ib_tracker =
-        # mongoIBclientIDtracker(database_name="another")
+        # Fallback-Logik für leere Werte
+        if not ipaddress:
+            ipaddress = "127.0.0.1"
+            self.log.warning("No IP address found, using default 127.0.0.1")
+        if not port:
+            port = 7497
+            self.log.warning("No port found, using default 7497 (Paper Trading)")
 
-        # If you copy for another broker include these lines
+        self._ib_connection_config = dict(ipaddress=ipaddress, port=port, client=client_id)
+
         self._log = get_logger(
             "connectionIB",
             {
-                TYPE_LOG_LABEL: log_name,
+                TYPE_LOG_LABEL: "INIT",
                 BROKER_LOG_LABEL: "IB",
                 CLIENTID_LOG_LABEL: client_id,
             },
         )
 
-        # You can pass a client id yourself, or let IB find one
-
         try:
-            self._init_connection(
-                ipaddress=ipaddress, port=port, client_id=client_id, account=account
-            )
+            self._init_connection(ipaddress=ipaddress, port=port, client_id=client_id, account=account)
         except Exception as e:
-            # Log all exceptions generated during connection as critical error.
-            # Under the default production setup this should send an email.
-            # Error is reraised as we can't really continue and user intervention is required
-            self.log.critical(
-                f"IB connection failed with exception - {e}, connection aborted."
-            )
+            self._log.critical(f"IB connection failed: {e}")
             raise
 
-    def _init_connection(
-        self, ipaddress: str, port: int, client_id: int, account=arg_not_supplied
-    ):
+    def _init_connection(self, ipaddress: str, port: int, client_id: int, account=arg_not_supplied):
+        """
+        Establish connection to TWS or IB Gateway.
+        """
         ib = IB()
 
         try:
             if account is arg_not_supplied:
-                ## not passed get from config
                 account = get_broker_account()
         except missingData:
-            self.log.error(
-                "Broker account ID not found in private config - may cause issues"
-            )
+            self.log.error("Broker account ID not found in private config — may cause issues.")
             ib.connect(ipaddress, port, clientId=client_id)
         else:
-            ## connect using account
             ib.connect(ipaddress, port, clientId=client_id, account=account)
 
-        # Sometimes takes a few seconds to resolve... only have to do this once per process so no biggie
-        time.sleep(5)
-
+        time.sleep(2)
         self._ib = ib
         self._account = account
+        self.log.info(f"Connected to IB at {ipaddress}:{port} with client_id {client_id}")
 
     @property
     def ib(self):
         return self._ib
 
-    @property
-    def log(self):
+    def get_log(self):
         return self._log
 
     def __repr__(self):
-        return "IB broker connection" + str(self._ib_connection_config)
+        return f"IB broker connection {self._ib_connection_config}"
 
     def client_id(self):
         return self._ib_connection_config["client"]
 
-    @property
-    def account(self):
-        return self._account
-
     def close_connection(self):
-        self.log.debug("Terminating %s" % str(self._ib_connection_config))
+        """
+        Close the IB connection safely.
+        """
+        self.log.debug(f"Terminating {self._ib_connection_config}")
         try:
-            # Try and disconnect IB client
             self.ib.disconnect()
+            self.log.info("IB connection closed.")
         except BaseException:
-            self.log.warning(
-                "Trying to disconnect IB client failed... ensure process is killed"
-            )
+            self.log.warning("Trying to disconnect IB client failed. Ensure process is killed.")
 
 
 def get_broker_account() -> str:
-    production_config = get_production_config()
-    account_id = production_config.get_element("broker_account")
-    return account_id
+    """
+    Retrieve the broker account ID safely.
+    Falls back to private_config.yaml or ib_defaults() if missing.
+    """
+    try:
+        production_config = get_production_config()
+        account_id = production_config.get_element("broker_account")
+        if account_id:
+            return account_id
+    except Exception as e:
+        print(f"⚠️ Warnung: Produktionskonfiguration konnte nicht geladen werden ({e})")
+
+    # Fallback auf private_config oder ib_defaults
+    try:
+        from sysbrokers.IB.ib_connection_defaults import ib_defaults
+        cfg = ib_defaults()
+        if "ib_account" in cfg:
+            print(f"ℹ️ Verwende Fallback-Account aus ib_defaults: {cfg['ib_account']}")
+            return cfg["ib_account"]
+    except Exception as e:
+        print(f"⚠️ Konnte auch keine Fallback-Konfiguration laden ({e})")
+
+    raise ValueError("❌ Kein gültiges Brokerkonto gefunden – prüfe private/private_config.yaml")

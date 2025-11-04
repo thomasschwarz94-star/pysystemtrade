@@ -1,6 +1,18 @@
-#YAML
+# YAML
 #
 # Raw data
+#
+
+broker:
+  ib:
+    host: 127.0.0.1
+    port: 7497           # Paper-Trading-Port
+    client_id: 101       # frei wählbar, pro Verbindung eindeutig
+    account: DUN761027   # deine echte Paper-Kontonummer
+
+production:
+  log_path: ~/systemtrade/logs
+  cache_path: ~/systemtrade/cache
 #
 #
 # Trading rules
