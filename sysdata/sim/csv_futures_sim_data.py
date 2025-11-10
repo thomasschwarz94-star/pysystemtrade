@@ -1,9 +1,9 @@
 """
 Get data from .csv files used for futures trading
-
 """
 
 from syscore.constants import arg_not_supplied
+# Import aller benötigten CSV-Datenklassen
 from sysdata.csv.csv_multiple_prices import csvFuturesMultiplePricesData
 from sysdata.csv.csv_adjusted_prices import csvFuturesAdjustedPricesData
 from sysdata.csv.csv_spot_fx import csvFxPricesData
@@ -25,6 +25,9 @@ class csvFuturesSimData(genericBlobUsingFuturesSimData):
     def __init__(
         self, csv_data_paths=arg_not_supplied, log=get_logger("csvFuturesSimData")
     ):
+        # FIX: dataBlob erwartet Klassen-Objekte in class_list
+        # Ursprünglich waren hier Tuples mit String-Namen - jetzt echte Klassen
+        # Dies ist kompatibel mit pysystemtrade's class_list Logik (siehe data_blob.py:80-82)
         data = dataBlob(
             log=log,
             csv_data_paths=csv_data_paths,
